@@ -1,0 +1,279 @@
+---
+title: "And example of a metabolomics untargeted analysis project: Precolumn Oxidation"
+author: "Darya Akimova"
+date: "August 7, 2017"
+output: html_document
+---
+
+Older data - stripped of mass and retention time identifiers and all compounds are only identified by an arbitrary number (although the compounds were sorted by mass from smallest to largest before being given a number).
+
+There's a moving boundary where I'm rewriting the code in this doc, and the analysis in general. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+
+```{r}
+# packages
+require(tidyverse)
+require(cowplot)
+
+# data
+n.data <- read_csv(file = "QTOF_precolumn_redox_neg_untarget_nomassRT.csv", col_names = TRUE)
+p.data <- read_csv(file = "QTOF_precolumn_redox_pos_untarget_nomassRT.csv", col_names = TRUE)  
+
+ncol(n.data)
+ncol(p.data)
+```
+
+There are 946 Compounds (Features) associated with the negative mode samples (948 columns in the n.data because 1 column is sample names and the other contains the oxidizing potential measurement). There are 474 Compounds associated with the postive mode data. Important note: even though the same compound may be detected in both and negative mode, this is not always the case, and the nC1 is not necessarily the same as pC1 (and so on for the other numbered compounds). 
+
+Another quick note: n.X stands for negative mode data and p.X stands for positive mode data.
+
+What the data looks like:
+
+```{r}
+n.data
+summary(n.data$Potential)
+```
+
+There are 5 samples per each oxidizing potential.
+
+```{r}
+n.data$Potential <- factor(n.data$Potential, 
+                           levels = c(0, 250, 500, 750, 1000), 
+                           labels = c("0", "250", "500", "750", "1000"))
+p.data$Potential <- factor(p.data$Potential, 
+                           levels = c(0, 250, 500, 750, 1000), 
+                           labels = c("0", "250", "500", "750", "1000"))
+```
+  
+Metabolomics data tend to have a right-skewed distribution and it's customary to log-transform the data. PCA is senstive to extreme values and so here, I will log-transform as well before the PCA analysis.
+
+
+```{r}
+n.data.log <- bind_cols(
+  select(n.data, Samples:Potential),
+  n.data %>% select(nC1:nC946) %>% log()
+  )
+p.data.log <- bind_cols(
+  select(p.data, Samples:Potential),
+  p.data %>% select(pC1:pC474) %>% log()
+)
+
+###PCA Start###
+  
+n.pca <- prcomp(n.data.log[, 3:ncol(n.data.log)], center = TRUE, scale = FALSE)
+p.pca <- prcomp(p.data.log[, 3:ncol(p.data.log)], center = TRUE, scale = FALSE)
+
+```
+
+# Moving boundary of rewriting/reworking
+
+
+
+
+
+
+
+
+
+  
+n.u.prop.var <- data.frame(cbind(1:length(n.u.pca$sdev),
+                                n.u.pca$sdev^2 / sum(n.u.pca$sdev^2),
+                                cumsum(n.u.pca$sdev^2 / sum(n.u.pca$sdev^2))
+                                )
+                          )
+colnames(n.u.prop.var) <- c("PC", "Proportion", "Cumulative")
+
+p.u.prop.var <- data.frame(cbind(1:length(p.u.pca$sdev), 
+                                p.u.pca$sdev^2 / sum(p.u.pca$sdev^2),
+                                cumsum(p.u.pca$sdev^2 / sum(p.u.pca$sdev^2))
+                                )
+                          )
+colnames(p.u.prop.var) <- c("PC", "Proportion", "Cumulative")
+
+#Proportion of variance and cumularive variance plots, to select number of principal components
+n.u.PC.plot.prop <- ggplot(data = n.u.prop.var, aes(x = PC, y = Proportion)) + 
+                    geom_point(size = 3) +
+                    geom_line(size = 1.5) +
+                    xlab("Principal Component") +
+                    ylab("Proportion of Variance Explained") +
+                    ggtitle("Negative mode \n Proportion of Variance")
+n.u.PC.plot.cumu <- ggplot(data = n.u.prop.var, aes(x = PC, y = Cumulative)) + 
+                    geom_point(size = 3) +
+                    geom_line(size = 1.5) +
+                    xlab("Principal Component") +
+                    ylab("Cumulative Proportion of Variance Explained") +
+                    ggtitle("Negative mode \n Cumulative Proportion of Variance")
+
+p.u.PC.plot.prop <- ggplot(data = p.u.prop.var, aes(x = PC, y = Proportion)) + 
+                    geom_point(size = 3) +
+                    geom_line(size = 1.5) +
+                    xlab("Principal Component") +
+                    ylab("Proportion of Variance Explained") +
+                    ggtitle("Positive mode \n Proportion of Variance")
+p.u.PC.plot.cumu <- ggplot(data = p.u.prop.var, aes(x = PC, y = Cumulative)) + 
+                    geom_point(size = 3) +
+                    geom_line(size = 1.5) +
+                    xlab("Principal Component") +
+                    ylab("Cumulative Proportion of Variance Explained") +
+                    ggtitle("Positive mode \n Cumulative Proportion of Variance")
+
+#Show the plots
+n.u.PC.plot.prop
+n.u.PC.plot.cumu
+p.u.PC.plot.prop
+p.u.PC.plot.cumu
+
+#Figure out which PCs are important for separating out the data
+n.u.comp <- cbind(n.u.data[, 1], data.frame(n.u.pca$x))
+colnames(n.u.comp)[1] <- "Potential"
+  
+n.u.PC1.v.PC2 <- ggplot(n.u.comp, aes(x = PC1, y = PC2, color = Potential)) +
+                 geom_point(size = 3) +
+                 ggtitle("PC1 vs PC2 \n Negative Mode") +
+                 xlab("PC1 (77.3% var)") +
+                 ylab("PC2 (12.9% var)")
+n.u.PC2.v.PC3 <- ggplot(n.u.comp, aes(x = PC2, y = PC3, color = Potential)) +
+                 geom_point(size = 3) +
+                 ggtitle("PC2 vs PC3 \n Negative Mode") +
+                 xlab("PC2 (12.9% var)") +
+                 ylab("PC3 (2.96%)")
+n.u.PC3.v.PC4 <- ggplot(n.u.comp, aes(x = PC3, y = PC4, color = Potential)) +
+                 geom_point(size = 3) +
+                 ggtitle("PC3 vs PC4 \n Negative Mode")  +
+                 xlab("PC3 (2.96%)") +
+                 ylab("PC4 (1.98%)")
+
+#Show the plots
+n.u.PC1.v.PC2
+n.u.PC2.v.PC3
+n.u.PC3.v.PC4
+  
+n.all.PC.plots <- plot_grid(n.u.PC1.v.PC2, n.u.PC2.v.PC3, n.u.PC3.v.PC4,
+                      labels=c("A", "B", "C"), ncol = 2)
+save_plot("negmode_PC_plots.tiff", n.all.PC.plots,
+          ncol = 2,
+          nrow = 2,
+          base_aspect_ratio = 1.5)
+  
+  p.u.comp.t1 <- data.frame(p.u.pca$x)
+  p.u.comp.t2 <- cbind(p.u.data.t1[, 1], p.u.comp.t1)
+  colnames(p.u.comp.t2)[1] <- "Potential"
+  
+  p.u.PC1.v.PC2 <- ggplot(p.u.comp.t2, aes(x = PC1, y = PC2, color = Potential)) +
+                   geom_point(size = 3) +
+                   ggtitle("PC1 vs PC2 \n Positive Mode")
+  p.u.PC2.v.PC3 <- ggplot(p.u.comp.t2, aes(x = PC2, y = PC3, color = Potential)) +
+                   geom_point(size = 3) +
+                   ggtitle("PC2 vs PC3 \n Positive Mode")
+  p.u.PC3.v.PC4 <- ggplot(p.u.comp.t2, aes(x = PC3, y = PC4, color = Potential)) +
+                   geom_point(size = 3) +
+                   ggtitle("PC3 vs PC4 \n Positive Mode")
+  
+
+  p.u.PC1.v.PC2
+
+  p.u.PC2.v.PC3
+  
+  p.u.PC3.v.PC4
+
+
+
+Note that the separation that makes the most sense is along PC1 (0mV to 1000mV spread out along the PC1 axis). PC2 may be interesting, but confusing, as there is some separation between groups, but 0mV and 1000mV are nearly at the same position, 250mV and 750mV are very similar, and 500mV is different from all other groups.PC3 may inform how the 0mV and the 250mV groups differ from the other three groups (and from each other).
+
+
+
+  
+  n.u.load.t1 <- data.frame(n.u.pca$rotation)
+  n.u.load.t2 <- n.u.load.t1[, 1:4]
+  n.u.load.PC1.t1 <- n.u.load.t2[order(n.u.load.t2$PC1), ]
+  
+  n.u.qq.PC1.plot.t1 <- ggplot(n.u.load.t2, aes(sample = PC1)) + stat_qq()
+  
+  n.u.qq.PC1.plot.t1
+  
+  #take the bottom 2.5% of loadings and the top 2.5% of loadings
+  n.u.select.PC1.t1 <- subset(n.u.load.t2, 
+                              PC1 >= quantile(n.u.load.PC1.t1$PC1, 0.975) | 
+                              PC1 <= quantile(n.u.load.PC1.t1$PC1, 0.025))
+  
+  #interesting compounds based on PC1
+  n.u.int.comp.PC1.t1 <- n.u.raw.full.t1[c(row.names(n.u.select.PC1.t1)), ]
+  n.u.int.full.PC1.t1 <- cbind(n.u.select.PC1.t1, n.u.int.comp.PC1.t1)  
+  
+  #Print the compound names that are the top 5% of data (bottom 2.5% and top 2.5%)
+  length(n.u.int.full.PC1.t1$Compound_Name)
+  n.u.int.full.PC1.t1$Compound_Name  
+  
+  
+  
+  p.u.load.t1 <- data.frame(p.u.pca$rotation)
+  p.u.load.t2 <- p.u.load.t1[, 1:3]
+  p.u.load.PC1.t1 <- p.u.load.t2[order(p.u.load.t2$PC1), ]
+  
+  p.u.qq.PC1.plot.t1 <- ggplot(p.u.load.t2, aes(sample = PC1)) + stat_qq()
+  
+  p.u.qq.PC1.plot.t1
+  
+  p.u.select.PC1.t1 <- subset(p.u.load.t2,
+                              PC1 >= quantile(p.u.load.PC1.t1$PC1, 0.975) |
+                              PC1 <= quantile(p.u.load.PC1.t1$PC1, 0.025))
+  
+  p.u.int.comp.PC1.t1 <- p.u.raw.full.t1[c(row.names(p.u.select.PC1.t1)), ]
+  p.u.int.full.PC1.t1 <- cbind(p.u.select.PC1.t1, p.u.int.comp.PC1.t1)      
+
+  length(p.u.int.full.PC1.t1$Compound_Name)
+  p.u.int.full.PC1.t1$Compound_Name
+  
+
+
+
+  #How many potentially interesting negative mode compounds there are
+  length(n.u.int.full.PC1.t2$Compound_Name)
+  #How many potentially interesting positive mode compounds there are
+  length(p.u.int.full.PC1.t1$Compound_Name)
+
+  neg.rep <- rep("neg", length(n.u.int.full.PC1.t2$Compound_Name))
+  pos.rep <- rep("pos", length(p.u.int.full.PC1.t1$Compound_Name))
+  
+  n.mass.rt.only.t1 <- n.u.int.full.PC1.t2[, 5:7]
+  n.mass.rt.only.t1$Mass <- as.numeric(as.character(n.mass.rt.only.t1$Mass))
+  n.mass.rt.only.t1$RT <- as.numeric(as.character(n.mass.rt.only.t1$RT))
+  n.mass.rt.only.t2 <- cbind(n.mass.rt.only.t1$Compound_Name, neg.rep, n.mass.rt.only.t1[, 2:3])  
+  colnames(n.mass.rt.only.t2) <- c("Compound_Name", "Mode", "Mass", "RT")
+
+  p.mass.rt.only.t1 <- p.u.int.full.PC1.t1[, 4:6]
+  p.mass.rt.only.t1$Mass <- as.numeric(as.character(p.mass.rt.only.t1$Mass))
+  p.mass.rt.only.t1$RT <- as.numeric(as.character(p.mass.rt.only.t1$RT))
+  p.mass.rt.only.t2 <- cbind(p.mass.rt.only.t1$Compound_Name, pos.rep, p.mass.rt.only.t1[, 2:3])
+  colnames(p.mass.rt.only.t2) <- c("Compound_Name", "Mode", "Mass", "RT")
+  
+  all.together.now.t1 <- rbind(p.mass.rt.only.t2, n.mass.rt.only.t2)
+  all.together.now.t2 <- all.together.now.t1[order(all.together.now.t1$Mass), ]
+  
+  all.plot.t1 <- ggplot(all.together.now.t1, aes(x = RT, y = Mass, color = Mode)) +
+                        geom_point(size = 3)
+  
+  all.plot.t1
+  
+  
+
+  
+ # save_plot("all_mass_vs_RT_plot.tiff",  all.plot.t1,
+  #        ncol = 1,
+   #       nrow = 1,
+    #      base_aspect_ratio = 2)
+  
+        
+
+What to do after this point?
+
+1) Find which compounds overlap between pos and neg mode? Eliminate repeats
+2) Clustering 
+3) Figure out which are products, which are precursors
+
+
+
