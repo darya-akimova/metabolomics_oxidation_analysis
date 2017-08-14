@@ -5,20 +5,57 @@ date: "August 7, 2017"
 output: html_document
 ---
 
-Older data - stripped of mass and retention time identifiers and all compounds are only identified by an arbitrary number (although the compounds were sorted by mass from smallest to largest before being given a number).
+Note: This is older data - I removed the meaningful identifiers from the compounds (Mass, LC Retention Time) and all compounds are only referenced by an arbitrary number (although the compounds were sorted by mass from smallest to largest before being given a number).
 
-There's a moving boundary where I'm rewriting the code in this doc, and the analysis in general. 
+
+### Background:
+
+#### The Motivation
+
+This is a mass spectrometry metabolomics experiment based on a project by a post-doc in my lab, who is in the process of creating a database of oxidation-senstive molecules, as well as the products of oxidation. 
+
+The motivation behind this project is that there is evidence that a variety of diseases may be caused by oxidative stress. Oxidative stress occurs when there is a large quantity of oxidizing molecules present in a cell, tissue, or organism, such that cannot be neautralized by the organism's antioxidant defenses, which come in a variety of forms and can be produced by the organism itself or obtained from the diet. When oxidative stress is too high, the oxidizing molecules go rogue, chemically speaking, and can damage DNA, proteins, and other molecules within the cell. This type of cellular damage has been linked to a variety of diseases, including cancer and heart disease. Therefore, in order to understand and treat these diseases properly, we need to understand the nature of the oxidative stress. However, we have a limited understanding of all of the molecules that are oxidation-senstive, and what molecules might be products of oxidative stress. 
+
+#### The Project
+
+To expand our knowledge about oxidative stress, a project has been initiated in my lab to create a "redoxome" database, which is a database of redox-related molecules, and that database should be ideally specific to the biological fluid or tissue of interest. The basic idea is to generate a database of "real" oxidation-sensitive molecules and the molecules produced by oxidative stress by taking a normal sample of the biological material that one is interested in studying, and subjecting it to one or more oxidizing potentials in a chemical oxidation cell (an artificially oxidizing environment). 
+
+In the case of this specific experient, there is a base/control "0mV" fraction, and 4 oxidized fractions, "250mV", "500mV", "750mV", and "1000mV". The fractions were run on our LC/MS system to quantify the abundances of the various molecules present in each sample. The features were then extracted in an "untargeted" way - as in it's possible to extract features based only on compound mass and retention time on the LC system, without knowing their exact identity. 
+
+Generally, it's a challenge to identify compounds based only on mass and retention time alone, especially as mass increases, because the potential chemical space increases and the ways that the atoms that make up that molecule can be connected increases. One way to identify compounds is to use a database, most labs will have their own database of compounds that they've run on their own system (while mass does not vary, retention time will vary with chromatography, and the separation of various isoforms will vary), or labs will adopat a chromatography system matched to a particular database. Identifying compounds based on mass is the next best thing, but it's never a sure thing.
+
+Unknowns can be subjected to what is known as MS/MS for identification - certain MS instruments can be used to subject samples to two rounds of MS. The first MS step is to select a peak or feature of interest, the second MS step is to fragment the compound. MS/MS is done on each compound of interest one by one to generate a clean fragment spectrum for each compound. The compound structure can then be guessed at because each molecule will break up in particular ways depending on which bonds are the most susceptible to breaking. Even when a compound structure is proposed, a standard is usually bought or synthesized (usually bought, because the standard has to be MS-grade purity with no potential confounding compounds), and the standard is run on the LC/MS system to compare retention time and MS/MS is performed to make sure the fragmentation patterns of the unknown and the standard are a match. 
+
+Hopefully it's becoming clear that identifying a potentially interesting unknown is a lot of work and potententially expensive. Therefore, it's extremely important to select well!
+
+#### The Goals
+
+1) Find potentially interesting biomarkers of oxidative stress.
+2) Create a model that could be used to estimate the oxidative stress in "Potential (mV)" units in a real biological sample, given only the compounds present in that sample and their abundances.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE)
 ```
 
 
-```{r}
+```{r packages}
 # packages
+require(heatmaply)
+require(magrittr)
 require(tidyverse)
 require(cowplot)
+```
 
+Another note that I should make, before getting too far, is that a Mass Spec can only detect charged molecules (as in a molecule with one or more total positive or negative charges). A MS instrument cannot measure an uncharged netural molecule and there is a number of ways to 1) give molecules a charge and 2) to detect the charged molcule. Also, there are two detection modes: 
+
++ Negative, which is better for picking up the signals of molecules that have a tendency to accept a negative charge
++ Positive, in which the instrument will only pick up signals from positively charged molecules, and is therefore better for quantifying the abundances of molecules that tend to pick up positive charges
+
+Some molecules can be picked up in both modes, others will be detected exclusively in one, but not the other. Depending on whether the quantification is relative or absolute (using a standard curve), the values for the same molecule in the two modes may not agree because molecules tend to be better at picking up one type of charge over another.
+
+The set of samples considered in this analysis was analyzed in both negative and positive mode, and both datasets are analyzed here. n._ will denote negative mode data, whereas p._ will denote positive mode data.
+
+```{r}
 # data
 n.data <- read_csv(file = "QTOF_precolumn_redox_neg_untarget_nomassRT.csv", col_names = TRUE)
 p.data <- read_csv(file = "QTOF_precolumn_redox_pos_untarget_nomassRT.csv", col_names = TRUE)  
@@ -33,14 +70,14 @@ Another quick note: n.X stands for negative mode data and p.X stands for positiv
 
 What the data looks like:
 
-```{r}
+```{r data_show}
 n.data
 summary(n.data$Potential)
 ```
 
 There are 5 samples per each oxidizing potential.
 
-```{r}
+```{r factor_potential}
 n.data$Potential <- factor(n.data$Potential, 
                            levels = c(0, 250, 500, 750, 1000), 
                            labels = c("0", "250", "500", "750", "1000"))
@@ -52,7 +89,7 @@ p.data$Potential <- factor(p.data$Potential,
 Metabolomics data tend to have a right-skewed distribution and it's customary to log-transform the data. PCA is senstive to extreme values and so here, I will log-transform as well before the PCA analysis.
 
 
-```{r}
+```{r log_trans_and_pca}
 n.data.log <- bind_cols(
   select(n.data, Samples:Potential),
   n.data %>% select(nC1:nC946) %>% log()
@@ -61,219 +98,264 @@ p.data.log <- bind_cols(
   select(p.data, Samples:Potential),
   p.data %>% select(pC1:pC474) %>% log()
 )
+```
 
-###PCA Start###
-  
+```{r}
+#### Clustering to show data ###
+n.data.log %>%
+  select(nC1:nC946) %>%
+  as.matrix() %>%
+  `rownames<-`(n.data.log$Samples) %>%
+  scale(center = TRUE, scale = TRUE) %>%
+  heatmap(scale = "none")
+```
+
+```{r}
+p.data.log %>%
+  select(pC1:pC474) %>%
+  as.matrix() %>%
+  `rownames<-`(p.data.log$Samples) %>%
+  scale(center = TRUE, scale = TRUE) %>%
+  heatmap(scale = "none")
+```
+
+I normally use mixOmics::cim() to create heatmaps, but it's not agreeing with me. Trying out heatmap for now, will fix the terrible color scheme later.
+
+```{r pca_calc}
 n.pca <- prcomp(n.data.log[, 3:ncol(n.data.log)], center = TRUE, scale = FALSE)
 p.pca <- prcomp(p.data.log[, 3:ncol(p.data.log)], center = TRUE, scale = FALSE)
 
 ```
 
-# Moving boundary of rewriting/reworking
 
 
+```{r var_explained}
+n.prop.var <- data.frame(
+  cbind(
+    1:length(n.pca$sdev),
+    n.pca$sdev^2 / sum(n.pca$sdev^2),
+    cumsum(n.pca$sdev^2 / sum(n.pca$sdev^2))
+    )
+  )
+colnames(n.prop.var) <- c("PC", "Proportion", "Cumulative")
 
+p.prop.var <- data.frame(
+  cbind(
+    1:length(p.pca$sdev), 
+    p.pca$sdev^2 / sum(p.pca$sdev^2),
+    cumsum(p.pca$sdev^2 / sum(p.pca$sdev^2))
+    )
+  )
+colnames(p.prop.var) <- c("PC", "Proportion", "Cumulative")
 
+# Proportion of variance and cumularive variance plots, to select number of principal components
 
+n.prop.var %>%
+  ggplot(aes(x = PC, y = Proportion)) + 
+  geom_point(size = 3) +
+  geom_line(size = 1.5) +
+  xlab("Principal Component") +
+  ylab("Proportion of Variance Explained") +
+  ggtitle("Negative mode \n Proportion of Variance")
 
+n.prop.var %>%
+  ggplot(aes(x = PC, y = Cumulative)) + 
+  geom_point(size = 3) +
+  geom_line(size = 1.5) +
+  xlab("Principal Component") +
+  ylab("Cumulative Proportion of Variance Explained") +
+  ggtitle("Negative mode \n Cumulative Proportion of Variance")
 
+p.prop.var %>% 
+  ggplot(aes(x = PC, y = Proportion)) + 
+  geom_point(size = 3) +
+  geom_line(size = 1.5) +
+  xlab("Principal Component") +
+  ylab("Proportion of Variance Explained") +
+  ggtitle("Positive mode \n Proportion of Variance")
 
-
-  
-n.u.prop.var <- data.frame(cbind(1:length(n.u.pca$sdev),
-                                n.u.pca$sdev^2 / sum(n.u.pca$sdev^2),
-                                cumsum(n.u.pca$sdev^2 / sum(n.u.pca$sdev^2))
-                                )
-                          )
-colnames(n.u.prop.var) <- c("PC", "Proportion", "Cumulative")
-
-p.u.prop.var <- data.frame(cbind(1:length(p.u.pca$sdev), 
-                                p.u.pca$sdev^2 / sum(p.u.pca$sdev^2),
-                                cumsum(p.u.pca$sdev^2 / sum(p.u.pca$sdev^2))
-                                )
-                          )
-colnames(p.u.prop.var) <- c("PC", "Proportion", "Cumulative")
-
-#Proportion of variance and cumularive variance plots, to select number of principal components
-n.u.PC.plot.prop <- ggplot(data = n.u.prop.var, aes(x = PC, y = Proportion)) + 
-                    geom_point(size = 3) +
-                    geom_line(size = 1.5) +
-                    xlab("Principal Component") +
-                    ylab("Proportion of Variance Explained") +
-                    ggtitle("Negative mode \n Proportion of Variance")
-n.u.PC.plot.cumu <- ggplot(data = n.u.prop.var, aes(x = PC, y = Cumulative)) + 
-                    geom_point(size = 3) +
-                    geom_line(size = 1.5) +
-                    xlab("Principal Component") +
-                    ylab("Cumulative Proportion of Variance Explained") +
-                    ggtitle("Negative mode \n Cumulative Proportion of Variance")
-
-p.u.PC.plot.prop <- ggplot(data = p.u.prop.var, aes(x = PC, y = Proportion)) + 
-                    geom_point(size = 3) +
-                    geom_line(size = 1.5) +
-                    xlab("Principal Component") +
-                    ylab("Proportion of Variance Explained") +
-                    ggtitle("Positive mode \n Proportion of Variance")
-p.u.PC.plot.cumu <- ggplot(data = p.u.prop.var, aes(x = PC, y = Cumulative)) + 
-                    geom_point(size = 3) +
-                    geom_line(size = 1.5) +
-                    xlab("Principal Component") +
-                    ylab("Cumulative Proportion of Variance Explained") +
-                    ggtitle("Positive mode \n Cumulative Proportion of Variance")
-
-#Show the plots
-n.u.PC.plot.prop
-n.u.PC.plot.cumu
-p.u.PC.plot.prop
-p.u.PC.plot.cumu
+p.prop.var %>% 
+  ggplot(aes(x = PC, y = Cumulative)) + 
+  geom_point(size = 3) +
+  geom_line(size = 1.5) +
+  xlab("Principal Component") +
+  ylab("Cumulative Proportion of Variance Explained") +
+  ggtitle("Positive mode \n Cumulative Proportion of Variance")
+```
 
 #Figure out which PCs are important for separating out the data
-n.u.comp <- cbind(n.u.data[, 1], data.frame(n.u.pca$x))
-colnames(n.u.comp)[1] <- "Potential"
+````{r neg_comp_plots}
+n.components <- n.data %>%
+  select(Samples:Potential) %>%
+  bind_cols(data.frame(n.pca$x))
   
-n.u.PC1.v.PC2 <- ggplot(n.u.comp, aes(x = PC1, y = PC2, color = Potential)) +
-                 geom_point(size = 3) +
-                 ggtitle("PC1 vs PC2 \n Negative Mode") +
-                 xlab("PC1 (77.3% var)") +
-                 ylab("PC2 (12.9% var)")
-n.u.PC2.v.PC3 <- ggplot(n.u.comp, aes(x = PC2, y = PC3, color = Potential)) +
-                 geom_point(size = 3) +
-                 ggtitle("PC2 vs PC3 \n Negative Mode") +
-                 xlab("PC2 (12.9% var)") +
-                 ylab("PC3 (2.96%)")
-n.u.PC3.v.PC4 <- ggplot(n.u.comp, aes(x = PC3, y = PC4, color = Potential)) +
-                 geom_point(size = 3) +
-                 ggtitle("PC3 vs PC4 \n Negative Mode")  +
-                 xlab("PC3 (2.96%)") +
-                 ylab("PC4 (1.98%)")
+n.components %>%
+  ggplot(aes(x = PC1, y = PC2, group = Potential, color = Potential)) +
+  geom_point(size = 3.5) +
+  ggtitle("PC1 vs PC2 \n Negative Mode") +
+  xlab("PC1 (77.3% var)") +
+  ylab("PC2 (12.9% var)") +
+  ylim(-7.0, 7.0)
 
-#Show the plots
-n.u.PC1.v.PC2
-n.u.PC2.v.PC3
-n.u.PC3.v.PC4
-  
-n.all.PC.plots <- plot_grid(n.u.PC1.v.PC2, n.u.PC2.v.PC3, n.u.PC3.v.PC4,
-                      labels=c("A", "B", "C"), ncol = 2)
-save_plot("negmode_PC_plots.tiff", n.all.PC.plots,
-          ncol = 2,
-          nrow = 2,
-          base_aspect_ratio = 1.5)
-  
-  p.u.comp.t1 <- data.frame(p.u.pca$x)
-  p.u.comp.t2 <- cbind(p.u.data.t1[, 1], p.u.comp.t1)
-  colnames(p.u.comp.t2)[1] <- "Potential"
-  
-  p.u.PC1.v.PC2 <- ggplot(p.u.comp.t2, aes(x = PC1, y = PC2, color = Potential)) +
-                   geom_point(size = 3) +
-                   ggtitle("PC1 vs PC2 \n Positive Mode")
-  p.u.PC2.v.PC3 <- ggplot(p.u.comp.t2, aes(x = PC2, y = PC3, color = Potential)) +
-                   geom_point(size = 3) +
-                   ggtitle("PC2 vs PC3 \n Positive Mode")
-  p.u.PC3.v.PC4 <- ggplot(p.u.comp.t2, aes(x = PC3, y = PC4, color = Potential)) +
-                   geom_point(size = 3) +
-                   ggtitle("PC3 vs PC4 \n Positive Mode")
-  
+n.components %>%
+  ggplot(aes(x = PC2, y = PC3, color = Potential)) +
+  geom_point(size = 3.5) +
+  ggtitle("PC2 vs PC3 \n Negative Mode") +
+  xlab("PC2 (12.9% var)") +
+  ylab("PC3 (2.96%)") +
+  xlim(-7.0, 7.0) +
+  ylim(-3.5, 3.5)
 
-  p.u.PC1.v.PC2
+n.components %>%
+  ggplot(aes(x = PC3, y = PC4, color = Potential)) +
+  geom_point(size = 3.5) +
+  ggtitle("PC3 vs PC4 \n Negative Mode")  +
+  xlab("PC3 (2.96%)") +
+  ylab("PC4 (1.98%)") +
+  xlim(-3.5, 3.5) +
+  ylim(-3.0, 3.0)
 
-  p.u.PC2.v.PC3
+n.comp.num <- as.data.frame(
+  cbind(
+    as.numeric(as.character(n.components$Potential)), 
+    n.components$PC1
+    )
+  )
+colnames(n.comp.num) <- c("Potential", "PC1")
+row.names(n.comp.num) <- n.components$Samples
+
+n.PC1.model <- lm(PC1 ~ Potential, data = n.comp.num)
+summary(n.PC1.model)
+
+n.comp.num %>%
+  ggplot(aes(x = Potential, y = PC1, color = Potential)) +
+  geom_point(size = 3.5) +
+  geom_smooth(method = "lm", color = "black") +
+  ggtitle("PC1 vs Potential (mV)\nNegative Mode") +
+  xlab("Potential (mV)")
+```
   
-  p.u.PC3.v.PC4
+  
+  
+```{r pos_comp_plots}
+p.components <- p.data %>%
+  select(Samples:Potential) %>%
+  bind_cols(data.frame(p.pca$x))
+  
+p.components %>%
+  ggplot(aes(x = PC1, y = PC2, color = Potential)) +
+  geom_point(size = 3.5) +
+  ggtitle("PC1 vs PC2 \n Positive Mode") +
+  xlab("PC1 (77.1%)") +
+  ylab("PC2 (12.7%)") +
+  ylim(-4, 4) +
+  xlim(-12.5, 12.5)
 
+p.components %>%
+  ggplot(aes(x = PC2, y = PC3, color = Potential)) +
+  geom_point(size = 3.5) +
+  ggtitle("PC2 vs PC3 \n Positive Mode") +
+  xlab("PC2 (12.7%)") +
+  ylab("PC3 (2.93%)") +
+  xlim(-4.5, 4.5) +
+  ylim(-3, 3)
+  
+p.components %>%
+  ggplot(aes(x = PC3, y = PC4, color = Potential)) +
+  geom_point(size = 3.5) +
+  ggtitle("PC3 vs PC4 \n Positive Mode") +
+  xlab("PC3 (2.93%)") +
+  ylab("PC4 (1.52%)") +
+  xlim(-3, 3) +
+  ylim(-3, 3)
+
+p.comp.num <- as.data.frame(
+  cbind(
+    as.numeric(as.character(p.components$Potential)), 
+    p.components$PC1
+    )
+  )
+colnames(p.comp.num) <- c("Potential", "PC1")
+row.names(p.comp.num) <- p.components$Samples
+
+p.PC1.model <- lm(PC1 ~ Potential, data = p.comp.num)
+summary(p.PC1.model)
+
+p.comp.num %>%
+  ggplot(aes(x = Potential, y = PC1, color = Potential)) +
+  geom_point(size = 3.5) +
+  geom_smooth(method = "lm", color = "black") +
+  ggtitle("PC1 vs Potential (mV)\nPositive Mode") +
+  xlab("Potential (mV)")
+```
 
 
 Note that the separation that makes the most sense is along PC1 (0mV to 1000mV spread out along the PC1 axis). PC2 may be interesting, but confusing, as there is some separation between groups, but 0mV and 1000mV are nearly at the same position, 250mV and 750mV are very similar, and 500mV is different from all other groups.PC3 may inform how the 0mV and the 250mV groups differ from the other three groups (and from each other).
 
+```{r neg_PC1_load}
+n.PC1.load <- tbl_df(n.pca$rotation) %>%
+  mutate(Compounds = row.names(data.frame(n.pca$rotation))) %>%
+  select(Compounds, PC1) %>%
+  arrange(PC1)
 
+n.PC1.load %>%  
+  ggplot(aes(sample = PC1)) + 
+  stat_qq() +
+  ggtitle("QQ Plot\nNegative Mode PC1") +
+  ylim(-0.4, 0.4)
 
-  
-  n.u.load.t1 <- data.frame(n.u.pca$rotation)
-  n.u.load.t2 <- n.u.load.t1[, 1:4]
-  n.u.load.PC1.t1 <- n.u.load.t2[order(n.u.load.t2$PC1), ]
-  
-  n.u.qq.PC1.plot.t1 <- ggplot(n.u.load.t2, aes(sample = PC1)) + stat_qq()
-  
-  n.u.qq.PC1.plot.t1
-  
-  #take the bottom 2.5% of loadings and the top 2.5% of loadings
-  n.u.select.PC1.t1 <- subset(n.u.load.t2, 
-                              PC1 >= quantile(n.u.load.PC1.t1$PC1, 0.975) | 
-                              PC1 <= quantile(n.u.load.PC1.t1$PC1, 0.025))
-  
-  #interesting compounds based on PC1
-  n.u.int.comp.PC1.t1 <- n.u.raw.full.t1[c(row.names(n.u.select.PC1.t1)), ]
-  n.u.int.full.PC1.t1 <- cbind(n.u.select.PC1.t1, n.u.int.comp.PC1.t1)  
-  
-  #Print the compound names that are the top 5% of data (bottom 2.5% and top 2.5%)
-  length(n.u.int.full.PC1.t1$Compound_Name)
-  n.u.int.full.PC1.t1$Compound_Name  
-  
-  
-  
-  p.u.load.t1 <- data.frame(p.u.pca$rotation)
-  p.u.load.t2 <- p.u.load.t1[, 1:3]
-  p.u.load.PC1.t1 <- p.u.load.t2[order(p.u.load.t2$PC1), ]
-  
-  p.u.qq.PC1.plot.t1 <- ggplot(p.u.load.t2, aes(sample = PC1)) + stat_qq()
-  
-  p.u.qq.PC1.plot.t1
-  
-  p.u.select.PC1.t1 <- subset(p.u.load.t2,
-                              PC1 >= quantile(p.u.load.PC1.t1$PC1, 0.975) |
-                              PC1 <= quantile(p.u.load.PC1.t1$PC1, 0.025))
-  
-  p.u.int.comp.PC1.t1 <- p.u.raw.full.t1[c(row.names(p.u.select.PC1.t1)), ]
-  p.u.int.full.PC1.t1 <- cbind(p.u.select.PC1.t1, p.u.int.comp.PC1.t1)      
+#take the bottom 2.5% of loadings and the top 2.5% of loadings
+n.select.PC1 <- subset(
+  n.PC1.load, 
+  PC1 >= quantile(n.PC1.load$PC1, 0.975) | 
+    PC1 <= quantile(n.PC1.load$PC1, 0.025)
+  )
 
-  length(p.u.int.full.PC1.t1$Compound_Name)
-  p.u.int.full.PC1.t1$Compound_Name
-  
+n.select.PC1
+
+# These compounds are much more manageable to plot in a heatmap figure
+
+n.data.log %>%
+  select(one_of(n.select.PC1$Compounds)) %>%
+  as.matrix() %>%
+  scale(center = TRUE, scale = TRUE) %>%
+  `rownames<-`(n.data.log$Samples) %>%
+  heatmaply(scale = "none")
+```
 
 
 
-  #How many potentially interesting negative mode compounds there are
-  length(n.u.int.full.PC1.t2$Compound_Name)
-  #How many potentially interesting positive mode compounds there are
-  length(p.u.int.full.PC1.t1$Compound_Name)
+Interesting compounds based on pos mode PC1. 
 
-  neg.rep <- rep("neg", length(n.u.int.full.PC1.t2$Compound_Name))
-  pos.rep <- rep("pos", length(p.u.int.full.PC1.t1$Compound_Name))
+```{r}
+p.PC1.load <- tbl_df(p.pca$rotation) %>%
+  mutate(Compounds = row.names(data.frame(p.pca$rotation))) %>%
+  select(Compounds, PC1) %>%
+  arrange(PC1)
   
-  n.mass.rt.only.t1 <- n.u.int.full.PC1.t2[, 5:7]
-  n.mass.rt.only.t1$Mass <- as.numeric(as.character(n.mass.rt.only.t1$Mass))
-  n.mass.rt.only.t1$RT <- as.numeric(as.character(n.mass.rt.only.t1$RT))
-  n.mass.rt.only.t2 <- cbind(n.mass.rt.only.t1$Compound_Name, neg.rep, n.mass.rt.only.t1[, 2:3])  
-  colnames(n.mass.rt.only.t2) <- c("Compound_Name", "Mode", "Mass", "RT")
-
-  p.mass.rt.only.t1 <- p.u.int.full.PC1.t1[, 4:6]
-  p.mass.rt.only.t1$Mass <- as.numeric(as.character(p.mass.rt.only.t1$Mass))
-  p.mass.rt.only.t1$RT <- as.numeric(as.character(p.mass.rt.only.t1$RT))
-  p.mass.rt.only.t2 <- cbind(p.mass.rt.only.t1$Compound_Name, pos.rep, p.mass.rt.only.t1[, 2:3])
-  colnames(p.mass.rt.only.t2) <- c("Compound_Name", "Mode", "Mass", "RT")
-  
-  all.together.now.t1 <- rbind(p.mass.rt.only.t2, n.mass.rt.only.t2)
-  all.together.now.t2 <- all.together.now.t1[order(all.together.now.t1$Mass), ]
-  
-  all.plot.t1 <- ggplot(all.together.now.t1, aes(x = RT, y = Mass, color = Mode)) +
-                        geom_point(size = 3)
-  
-  all.plot.t1
-  
-  
+p.PC1.load %>% 
+  ggplot( aes(sample = PC1)) + 
+  stat_qq() +
+  ggtitle("QQ Plot\nPositive Mode PC1") +
+  ylim(-0.3, 0.3)
 
   
- # save_plot("all_mass_vs_RT_plot.tiff",  all.plot.t1,
-  #        ncol = 1,
-   #       nrow = 1,
-    #      base_aspect_ratio = 2)
-  
-        
+p.select.PC1 <- subset(
+  p.PC1.load,
+  PC1 >= quantile(p.PC1.load$PC1, 0.975) |
+    PC1 <= quantile(p.PC1.load$PC1, 0.025)
+  )
+
+p.select.PC1
+
+p.data.log %>%
+  select(one_of(p.select.PC1$Compounds)) %>%
+  as.matrix() %>%
+  scale(center = TRUE, scale = TRUE) %>%
+  `rownames<-`(p.data.log$Samples) %>%
+  heatmaply(scale = "none")
+```
 
 What to do after this point?
 
 1) Find which compounds overlap between pos and neg mode? Eliminate repeats
-2) Clustering 
-3) Figure out which are products, which are precursors
-
-
-
