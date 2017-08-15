@@ -5,20 +5,20 @@ date: "August 7, 2017"
 output: html_document
 ---
 
-Note: This is older data - I removed the meaningful identifiers from the compounds (Mass, LC Retention Time) and all compounds are only referenced by an arbitrary number (although the compounds were sorted by mass from smallest to largest before being given a number).
+Note: This is older data and the meaningful identifiers have been removed from the compounds (Mass, LC Retention Time). All compounds are only referenced by an arbitrary number (although the compounds were sorted by mass from smallest to largest before being given a number).
 
 
 ### Background:
 
 #### The Motivation
 
-This is a mass spectrometry metabolomics experiment based on a project by a post-doc in my lab, who is in the process of creating a database of oxidation-senstive molecules, as well as the products of oxidation. 
+This is a mass spectrometry metabolomics experiment based on a project by a post-doc in my lab, who is in the process of creating a database of oxidation-senstive molecules and the products of their oxidation. 
 
-The motivation behind this project is that there is evidence that a variety of diseases may be caused by oxidative stress. Oxidative stress occurs when there is a large quantity of oxidizing molecules present in a cell, tissue, or organism, such that cannot be neautralized by the organism's antioxidant defenses, which come in a variety of forms and can be produced by the organism itself or obtained from the diet. When oxidative stress is too high, the oxidizing molecules go rogue, chemically speaking, and can damage DNA, proteins, and other molecules within the cell. This type of cellular damage has been linked to a variety of diseases, including cancer and heart disease. Therefore, in order to understand and treat these diseases properly, we need to understand the nature of the oxidative stress. However, we have a limited understanding of all of the molecules that are oxidation-senstive, and what molecules might be products of oxidative stress. 
+The motivation behind this project is that there is evidence that a variety of diseases may be caused by oxidative stress. Oxidative stress occurs when there is a large quantity of oxidizing molecules present in a cell, tissue, or organism, such that cannot be neautralized by the organism's antioxidant defenses, which come in a variety of forms and can be produced by the organism itself or obtained from the diet. When oxidative stress is too high, the oxidizing molecules go rogue, chemically speaking, and can damage DNA, proteins, and other molecules within the cell. This type of cellular damage has been linked to diseases such as cancer and heart disease. Therefore, in order to understand and treat these diseases properly, we need to understand the nature of the oxidative stress. However, we have a limited understanding of all of the molecules that are oxidation-senstive, and what molecules might be products of oxidative stress. 
 
 #### The Project
 
-To expand our knowledge about oxidative stress, a project has been initiated in my lab to create a "redoxome" database, which is a database of redox-related molecules, and that database should be ideally specific to the biological fluid or tissue of interest. The basic idea is to generate a database of "real" oxidation-sensitive molecules and the molecules produced by oxidative stress by taking a normal sample of the biological material that one is interested in studying, and subjecting it to one or more oxidizing potentials in a chemical oxidation cell (an artificially oxidizing environment). 
+To expand our knowledge about oxidative stress, a project has been initiated in my lab to create a "redoxome" database, which would act as a database of redox-related molecules, and that database should be ideally specific to the biological fluid or tissue of interest. The basic idea is to generate a database of "real" oxidation-sensitive molecules and the molecules produced by oxidative stress by taking a normal sample of the biological material that one is interested in studying, and subjecting it to one or more oxidizing potentials in a chemical oxidation cell (an artificially oxidizing environment). 
 
 In the case of this specific experient, there is a base/control "0mV" fraction, and 4 oxidized fractions, "250mV", "500mV", "750mV", and "1000mV". The fractions were run on our LC/MS system to quantify the abundances of the various molecules present in each sample. The features were then extracted in an "untargeted" way - as in it's possible to extract features based only on compound mass and retention time on the LC system, without knowing their exact identity. 
 
@@ -46,7 +46,7 @@ require(tidyverse)
 require(cowplot)
 ```
 
-Another note that I should make, before getting too far, is that a Mass Spec can only detect charged molecules (as in a molecule with one or more total positive or negative charges). A MS instrument cannot measure an uncharged netural molecule and there is a number of ways to 1) give molecules a charge and 2) to detect the charged molcule. Also, there are two detection modes: 
+Another note that I should make, before getting too far, is that a mass spec can only detect charged molecules (as in a molecule with one or more total positive or negative charges). A MS instrument cannot measure an uncharged netural molecule and there is a number of ways to 1) give molecules a charge and 2) to detect the charged molcule. Also, there are two detection modes: 
 
 + Negative, which is better for picking up the signals of molecules that have a tendency to accept a negative charge
 + Positive, in which the instrument will only pick up signals from positively charged molecules, and is therefore better for quantifying the abundances of molecules that tend to pick up positive charges
@@ -55,7 +55,7 @@ Some molecules can be picked up in both modes, others will be detected exclusive
 
 The set of samples considered in this analysis was analyzed in both negative and positive mode, and both datasets are analyzed here. n._ will denote negative mode data, whereas p._ will denote positive mode data.
 
-```{r}
+```{r data_load_and_show}
 # data
 n.data <- read_csv(file = "QTOF_precolumn_redox_neg_untarget_nomassRT.csv", col_names = TRUE)
 p.data <- read_csv(file = "QTOF_precolumn_redox_pos_untarget_nomassRT.csv", col_names = TRUE)  
@@ -88,7 +88,6 @@ p.data$Potential <- factor(p.data$Potential,
   
 Metabolomics data tend to have a right-skewed distribution and it's customary to log-transform the data. PCA is senstive to extreme values and so here, I will log-transform as well before the PCA analysis.
 
-
 ```{r log_trans_and_pca}
 n.data.log <- bind_cols(
   select(n.data, Samples:Potential),
@@ -100,8 +99,9 @@ p.data.log <- bind_cols(
 )
 ```
 
-```{r}
-#### Clustering to show data ###
+#### Hierarchical clustering of the negative mode data (samples and compounds):
+
+```{r neg_mode_clust}
 n.data.log %>%
   select(nC1:nC946) %>%
   as.matrix() %>%
@@ -110,7 +110,9 @@ n.data.log %>%
   heatmap(scale = "none")
 ```
 
-```{r}
+#### Hierarchical clustering of the postive mode data (samples and compounds):
+
+```{r pos_mode_clust}
 p.data.log %>%
   select(pC1:pC474) %>%
   as.matrix() %>%
@@ -121,13 +123,15 @@ p.data.log %>%
 
 I normally use mixOmics::cim() to create heatmaps, but it's not agreeing with me. Trying out heatmap for now, will fix the terrible color scheme later.
 
+#### PCA Analysis 
+
 ```{r pca_calc}
 n.pca <- prcomp(n.data.log[, 3:ncol(n.data.log)], center = TRUE, scale = FALSE)
 p.pca <- prcomp(p.data.log[, 3:ncol(p.data.log)], center = TRUE, scale = FALSE)
 
 ```
 
-
+Proportion of variance explained by each principal component for both sets of data:
 
 ```{r var_explained}
 n.prop.var <- data.frame(
@@ -148,15 +152,13 @@ p.prop.var <- data.frame(
   )
 colnames(p.prop.var) <- c("PC", "Proportion", "Cumulative")
 
-# Proportion of variance and cumularive variance plots, to select number of principal components
-
 n.prop.var %>%
   ggplot(aes(x = PC, y = Proportion)) + 
   geom_point(size = 3) +
   geom_line(size = 1.5) +
   xlab("Principal Component") +
   ylab("Proportion of Variance Explained") +
-  ggtitle("Negative mode \n Proportion of Variance")
+  ggtitle("Proportion of Variance Explained by Each Component\nNegative Mode")
 
 n.prop.var %>%
   ggplot(aes(x = PC, y = Cumulative)) + 
@@ -164,7 +166,7 @@ n.prop.var %>%
   geom_line(size = 1.5) +
   xlab("Principal Component") +
   ylab("Cumulative Proportion of Variance Explained") +
-  ggtitle("Negative mode \n Cumulative Proportion of Variance")
+  ggtitle("Cumulative Proportion of Variance Explained by Each Additional Component\nNegative Mode")
 
 p.prop.var %>% 
   ggplot(aes(x = PC, y = Proportion)) + 
@@ -172,7 +174,7 @@ p.prop.var %>%
   geom_line(size = 1.5) +
   xlab("Principal Component") +
   ylab("Proportion of Variance Explained") +
-  ggtitle("Positive mode \n Proportion of Variance")
+  ggtitle("Proportion of Variance Explained by Each Component\nPositive Mode")
 
 p.prop.var %>% 
   ggplot(aes(x = PC, y = Cumulative)) + 
@@ -180,10 +182,13 @@ p.prop.var %>%
   geom_line(size = 1.5) +
   xlab("Principal Component") +
   ylab("Cumulative Proportion of Variance Explained") +
-  ggtitle("Positive mode \n Cumulative Proportion of Variance")
+  ggtitle("Cumulative Proportion of Variance Explained by Each Additional Component\nPositive Mode")
 ```
 
-#Figure out which PCs are important for separating out the data
+For both datasets, the first principal component explains about 77% of the variance. There's a rapid drop-off: the second component in both cases explains about 13% of variance, and it's only downhill from there. In both cases, the first 4 PCs are most likely to be useful. 
+
+#### Which PCs are best for describing the variance that's associated with oxidative stress in these samples?
+
 ````{r neg_comp_plots}
 n.components <- n.data %>%
   select(Samples:Potential) %>%
@@ -214,7 +219,11 @@ n.components %>%
   ylab("PC4 (1.98%)") +
   xlim(-3.5, 3.5) +
   ylim(-3.0, 3.0)
+```
 
+It's clear from the first plot that using PC1 to describe the data leads to the best separation of the groups. Also, it looks like the samples from the different electrical potentials are ordered nicely already, but that can be checked more rigorously with a linear model:
+
+```{r neg_PC_v_potential}
 n.comp.num <- as.data.frame(
   cbind(
     as.numeric(as.character(n.components$Potential)), 
@@ -235,7 +244,7 @@ n.comp.num %>%
   xlab("Potential (mV)")
 ```
   
-  
+There is a clear strong positive relationship between PC1 and the electrical potential, although it doesn't look to be perfectly linear.   
   
 ```{r pos_comp_plots}
 p.components <- p.data %>%
@@ -268,7 +277,11 @@ p.components %>%
   ylab("PC4 (1.52%)") +
   xlim(-3, 3) +
   ylim(-3, 3)
+```
 
+PC1 also has the best relationship with electrochemical oxidative potential for the positive mode data. However, the spread of the data points within the groups, especially in the 0mV group, hints that the data quality is questionable.
+
+```{r post_pc1_lm}
 p.comp.num <- as.data.frame(
   cbind(
     as.numeric(as.character(p.components$Potential)), 
@@ -323,7 +336,10 @@ n.data.log %>%
   heatmaply(scale = "none")
 ```
 
+Looks like there's a good selection of compounds picked up with this analysis with 2 major groups of compounds, with 2 sub-families in each:
 
++ A group that's high in the 0mV samples that decrease in abundance as the oxidizing potential is increased (oxidation-sensitive molecules or precursors). 
++ A group of compounds that are low in the 0mV, but are abundant in the oxidized samples. These would be the oxidation products. 
 
 Interesting compounds based on pos mode PC1. 
 
@@ -356,6 +372,10 @@ p.data.log %>%
   heatmaply(scale = "none")
 ```
 
+The positive mode data. as hinted by the PCA analysis, is more variable than the negative mode analysis and the clustered data isn't as neat. It looks like there's some compounds that are oxidation-senstive that have been picked up by the analysis, but no oxidation products.
+
 What to do after this point?
 
-1) Find which compounds overlap between pos and neg mode? Eliminate repeats
+1) Find which compounds overlap between pos and neg mode? Eliminate repeats.
+2) Need a better feature selection procedure - PCA isn't the best for this purpose and it didn't work so well on the positive mode data.
+3) Need to create a "test" dataset to test some models on, or at the very least create a model with cross-validation.
